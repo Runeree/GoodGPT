@@ -83,7 +83,7 @@ namespace GoodGPTDesktop
             foreach (Line line in snapshot.Lines)
             {
                 string value = Flat(line.Text);
-                if (!(value.Contains("запроситевнесение") || value.Contains("попроситевнести") || value.Contains("спросите") || value.Contains("спроситьchatgpt") || value.Contains("askforfollow") || value.Contains("askanything") || value.Contains("messageclaude") || value.Contains("replytoclaude") || value.Contains("написатьсообщение") || value.Contains("typeamessage") || value.Contains("работайтенадчем") || value.Contains("askcodex"))) continue;
+                if (!(value.Contains("аботайтесcodex") || value.Contains("workwithcodex") || value.Contains("запроситевнесение") || value.Contains("попроситевнести") || value.Contains("спросите") || value.Contains("спроситьchatgpt") || value.Contains("askforfollow") || value.Contains("askanything") || value.Contains("messageclaude") || value.Contains("replytoclaude") || value.Contains("написатьсообщение") || value.Contains("typeamessage") || value.Contains("работайтенадчем") || value.Contains("askcodex"))) continue;
                 if (line.Bounds.Top < snapshot.Window.Top + snapshot.Window.Height * 0.60) continue;
                 double left = Math.Max(snapshot.Window.Left + 8, line.Bounds.Left - 16);
                 double top = line.Bounds.Top - 12;
@@ -109,6 +109,13 @@ namespace GoodGPTDesktop
             try
             {
                 if (cancelled() || !sameTarget()) return Failure("Окно изменилось.");
+                // OCR uses a real pointer click. Let the user finish the drag;
+                // never release the bag or move it away from their cursor.
+                for (int attempt = 0; (GetAsyncKeyState(0x01) & 0x8000) != 0; attempt++)
+                {
+                    if (attempt >= 1500 || cancelled() || !sameTarget()) return Failure("Отправка отменена.");
+                    Thread.Sleep(40);
+                }
                 Snapshot before = Read(target.Window);
                 System.Windows.Rect input = InputBounds(before);
                 if (input.IsEmpty) input = target.ComposerBounds;
@@ -181,6 +188,7 @@ namespace GoodGPTDesktop
         [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT point);
         [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
         [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
+        [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
         [DllImport("user32.dll")] private static extern uint SendInput(uint count, INPUT[] input, int size);
     }
 }

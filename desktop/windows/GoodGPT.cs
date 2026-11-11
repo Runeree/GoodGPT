@@ -23,6 +23,30 @@ namespace GoodGPTDesktop
         {
             foreach (string arg in args)
             {
+                if (arg.StartsWith("--diagnose=", StringComparison.Ordinal))
+                {
+                    System.Text.StringBuilder report = new System.Text.StringBuilder();
+                    try
+                    {
+                        NativeSender sender = new NativeSender();
+                        report.AppendLine(NativeSender.ForegroundDetails());
+                        NativeSender.TargetInfo target = sender.DetectTarget();
+                        report.AppendLine("target=" + (target == null ? "none" : target.App + "; pid=" + target.ProcessId));
+                        if (target != null)
+                        {
+                            report.AppendLine(sender.DescribeComposer(target));
+                            ScreenComposer.Snapshot snapshot = ScreenComposer.Read(target.Window);
+                            report.AppendLine("window=" + snapshot.Window);
+                            report.AppendLine("ocrLines=" + snapshot.Lines.Count);
+                            report.AppendLine("input=" + ScreenComposer.InputBounds(snapshot));
+                            int start = Math.Max(0, snapshot.Lines.Count - 12);
+                            for (int i = start; i < snapshot.Lines.Count; i++) report.AppendLine(snapshot.Lines[i].Bounds + " | " + snapshot.Lines[i].Text);
+                        }
+                    }
+                    catch (Exception ex) { report.AppendLine(ex.ToString()); }
+                    File.WriteAllText(arg.Substring(11), report.ToString());
+                    return;
+                }
                 if (arg.StartsWith("--self-check=", StringComparison.Ordinal))
                 {
                     try
@@ -157,7 +181,7 @@ namespace GoodGPTDesktop
             tray.DoubleClick += delegate { Reset(false); ShowNotice("Потяните вниз. Колёсико или Shift + движение — перевернуть.", 7); };
             SourceInitialized += OnSourceInitialized;
             MouseLeftButtonDown += OnMouseDown; MouseMove += OnMouseMove; MouseLeftButtonUp += OnMouseUp;
-            LostMouseCapture += delegate { if (held) Reset(false); };
+            LostMouseCapture += delegate { if (held && (Win32.GetAsyncKeyState(0x01) & 0x8000) == 0) Release(); };
             Closed += delegate { disposed = true; Interlocked.Increment(ref sendGeneration); if (timer != null) timer.Stop(); tray.Visible = false; tray.Dispose(); };
             timer = new DispatcherTimer(DispatcherPriority.Render); timer.Interval = TimeSpan.FromMilliseconds(16); timer.Tick += OnTick; timer.Start();
         }
@@ -219,7 +243,12 @@ namespace GoodGPTDesktop
 
         private void OnMouseMove(object source, MouseEventArgs e)
         {
-            if (!held) return; Point p = e.GetPosition(this);
+            if (!held) return; TrackPointer(e.GetPosition(this)); e.Handled = true;
+        }
+
+        private void TrackPointer(Point p)
+        {
+            if (Distance(p.X, p.Y, lastX, lastY) < 0.05) return;
             double dt = Math.Max(0.008, elapsed - lastPointerTime), dx = p.X - lastX, dy = p.Y - lastY;
             speed = Clamp(Math.Sqrt(dx * dx + dy * dy) / dt, 0, 1800);
             if (mode == "tension")
@@ -239,7 +268,7 @@ namespace GoodGPTDesktop
                     targetX = Clamp(p.X + offsetX, leftBound + 58, rightBound - 58); targetY = Clamp(p.Y + offsetY, 76, floor - 65); av += Clamp(dx / dt, -900, 900) * 0.00045;
                 }
             }
-            lastX = p.X; lastY = p.Y; lastPointerTime = elapsed; e.Handled = true;
+            lastX = p.X; lastY = p.Y; lastPointerTime = elapsed;
         }
 
         private void OnMouseUp(object source, MouseButtonEventArgs e)
@@ -289,12 +318,13 @@ namespace GoodGPTDesktop
             if (handle != IntPtr.Zero && Win32.GetCursorPos(out cursor))
             {
                 Point point = PointFromScreen(new Point(cursor.X, cursor.Y));
-                bool through = paused || sending || (!held && !BagHit(point));
+                if (held && (Win32.GetAsyncKeyState(0x01) & 0x8000) != 0) TrackPointer(point);
+                bool through = paused || (!held && (sending || !BagHit(point)));
                 if (through != clickThrough) { clickThrough = through; Win32.SetStyle(handle, baseStyle | (through ? Win32.WS_EX_TRANSPARENT : 0)); }
             }
             if (paused) return;
             if (held && (Win32.GetAsyncKeyState(0x01) & 0x8000) == 0) Release();
-            if ((Win32.GetAsyncKeyState(0x1b) & 0x8000) != 0 && mode != "hung") Reset(false);
+            if ((Win32.GetAsyncKeyState(0x1b) & 0x8000) != 0 && mode != "hung") { Interlocked.Increment(ref sendGeneration); Reset(false); }
             if ((held || mode == "free") && grabbed != null && Win32.GetForegroundWindow() != grabbed.Window)
             {
                 Reset(false); ShowNotice("Активное окно изменилось. Похвала не отправлена.", 4);
@@ -404,10 +434,6 @@ namespace GoodGPTDesktop
             lastPraiseText = Praise[choice]; copyItem.Enabled = true; string message = lastPraiseText;
             int generation = Interlocked.Increment(ref sendGeneration);
             sending = true; ShowNotice("Отправляем похвалу в " + target.App + "…", 15);
-            // The target must receive a real click when OCR is needed. End the
-            // completed pour and release the transparent overlay's mouse capture.
-            held = false; ReleaseMouseCapture(); Cursor = Cursors.Arrow; mode = "free"; releaseAt = elapsed;
-            if (handle != IntPtr.Zero) { clickThrough = true; Win32.SetStyle(handle, baseStyle | Win32.WS_EX_TRANSPARENT); }
             Thread worker = new Thread(delegate()
             {
                 NativeSender.SendResult result;

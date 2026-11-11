@@ -33,6 +33,13 @@ namespace GoodGPTDesktop
         private TargetInfo lastTarget;
         private readonly int ownProcessId = Process.GetCurrentProcess().Id;
 
+        internal static string ForegroundDetails()
+        {
+            IntPtr window = GetForegroundWindow(); uint id; GetWindowThreadProcessId(window, out id);
+            string process = "unknown"; try { process = Process.GetProcessById((int)id).ProcessName; } catch { }
+            return "window=" + window.ToInt64() + "; pid=" + id + "; process=" + process + "; iconic=" + IsIconic(window) + "; session=" + Process.GetCurrentProcess().SessionId;
+        }
+
         public TargetInfo DetectTarget()
         {
             IntPtr window = GetForegroundWindow();
@@ -100,6 +107,12 @@ namespace GoodGPTDesktop
                 Thread.Sleep(70);
                 if (cancelled() || !SameTarget(target) || !BelongsTo(AutomationElement.FocusedElement, target.Window)) return Fail("Не удалось сфокусировать поле сообщения.");
                 if (!TryReadEditor(editor, out current) || Clean(current).Length != 0) return Fail("Поле изменилось. Черновик оставлен нетронутым.");
+                // UIA includes Chromium's generated placeholder in Value/Text.
+                // Native Copy reads only actual editable content.
+                string actualDraft;
+                if (!WaitForModifiers(cancelled)) return Fail("Отпустите Shift, Ctrl и Alt для вставки.");
+                if (!TryReadFocusedEditor(delegate { return !cancelled() && SameTarget(target) && FocusIsComposer(editor); }, out actualDraft)) return Fail("Не удалось прочитать содержимое поля.");
+                if (Clean(actualDraft).Length != 0) return Fail("В поле есть черновик. Он сохранён.");
                 object rawPattern;
                 if (editor.TryGetCurrentPattern(ValuePattern.Pattern, out rawPattern))
                 {
@@ -286,6 +299,7 @@ namespace GoodGPTDesktop
                 string all = id + " " + name + " " + (element.Current.HelpText ?? "").ToLowerInvariant() + " " + (element.Current.ClassName ?? "").ToLowerInvariant();
                 if (all.Contains("terminal") || all.Contains("терминал") || all.Contains("search") || all.Contains("поиск") || all.Contains("address") || all.Contains("адрес") || all.Contains("monaco") || all.Contains("source editor") || all.Contains("редактор кода")) return 0;
                 if (all.Contains("prosemirror") || all.Contains("tiptap")) return 135;
+                if (all.Contains("работайте с codex") || all.Contains("work with codex")) return 145;
                 if (id.Contains("prompt-textarea") || id.Contains("claude-textarea") || id == "chat-input") return 140;
                 if (id.Contains("composer") || id.Contains("chat-input")) return 120;
                 if (name.Contains("ask codex") || name.Contains("message codex") || name.Contains("ask chatgpt") || name.Contains("message chatgpt") || name.Contains("сообщение chatgpt") || name.Contains("сообщение codex")) return 110;
@@ -310,6 +324,18 @@ namespace GoodGPTDesktop
                 return bounds;
             }
             catch { return System.Windows.Rect.Empty; }
+        }
+
+        internal string DescribeComposer(TargetInfo target)
+        {
+            AutomationElement window = AutomationElement.FromHandle(target.Window);
+            AutomationElement editor = FindComposer(window, target);
+            if (editor == null) return "uiaEditor=none";
+            object pattern; string value = "unavailable", text = "unavailable";
+            if (editor.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)) value = ((ValuePattern)pattern).Current.Value;
+            if (editor.TryGetCurrentPattern(TextPattern.Pattern, out pattern)) text = ((TextPattern)pattern).DocumentRange.GetText(-1);
+            string actual; bool readable = TryReadEditor(editor, out actual);
+            return "uiaEditor=" + editor.Current.Name + "; class=" + editor.Current.ClassName + "; value=" + value + "; text=" + text + "; editableContent=" + (readable ? actual : "unavailable");
         }
 
         private static string Identity(AutomationElement element)
@@ -349,9 +375,46 @@ namespace GoodGPTDesktop
             text = "";
             if (editor == null) return false;
             object pattern;
-            if (editor.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)) { text = ((ValuePattern)pattern).Current.Value; return true; }
-            if (editor.TryGetCurrentPattern(TextPattern.Pattern, out pattern)) { text = ((TextPattern)pattern).DocumentRange.GetText(-1); return true; }
+            if (editor.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)) { text = ActualEditorValue(editor, ((ValuePattern)pattern).Current.Value); return true; }
+            if (editor.TryGetCurrentPattern(TextPattern.Pattern, out pattern)) { text = ActualEditorValue(editor, ((TextPattern)pattern).DocumentRange.GetText(-1)); return true; }
             return false;
+        }
+
+        private static string ActualEditorValue(AutomationElement editor, string value)
+        {
+            string clean = Clean(value), name = Clean(editor.Current.Name);
+            if (String.Equals(clean, name, StringComparison.OrdinalIgnoreCase) &&
+                (name.Equals("Работайте с Codex", StringComparison.OrdinalIgnoreCase) || name.Equals("Work with Codex", StringComparison.OrdinalIgnoreCase))) return "";
+            return value;
+        }
+
+        private static bool TryReadFocusedEditor(Func<bool> stillFocused, out string value)
+        {
+            value = ""; Forms.DataObject saved = null; string ownedText = null; uint sequence = 0;
+            try
+            {
+                if (!stillFocused()) return false;
+                saved = SnapshotClipboard();
+                string marker = "GoodGPT-read-" + Guid.NewGuid().ToString("N");
+                Forms.Clipboard.SetText(marker); ownedText = marker; sequence = GetClipboardSequenceNumber();
+                if (!SendChord(0x41) || !SendChord(0x43)) return false;
+                for (int attempt = 0; attempt < 12 && GetClipboardSequenceNumber() == sequence; attempt++)
+                { Thread.Sleep(35); if (!stillFocused()) return false; }
+                if (!stillFocused()) return false;
+                string copied = Forms.Clipboard.ContainsText(Forms.TextDataFormat.UnicodeText) ? Forms.Clipboard.GetText(Forms.TextDataFormat.UnicodeText) : "";
+                sequence = GetClipboardSequenceNumber(); ownedText = copied;
+                SendKey(0x27); value = copied == marker ? "" : copied; return true;
+            }
+            catch { return false; }
+            finally
+            {
+                try
+                {
+                    if (sequence != 0 && GetClipboardSequenceNumber() == sequence && Forms.Clipboard.ContainsText() && Forms.Clipboard.GetText() == ownedText)
+                    { if (saved != null) Forms.Clipboard.SetDataObject(saved, true); else Forms.Clipboard.Clear(); }
+                }
+                catch { }
+            }
         }
 
         private static bool HasAttachments(AutomationElement window)

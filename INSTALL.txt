@@ -1,4 +1,4 @@
-GoodGPT 1.0.3 - установка в Chrome / Edge / Chromium
+GoodGPT 1.0.4 - установка в Chrome / Edge / Chromium
 
 1. Распакуйте GoodGPT-Chrome.zip в отдельную папку GoodGPT.
 2. Откройте chrome://extensions (для Edge: edge://extensions).
