@@ -98,6 +98,7 @@ async function start() {
     root,
     assets: { bag: assetURL('assets/bag.png'), treats: assetURL('assets/treats.png') },
     reducedMotion: settings.gentle || media.matches,
+    getSinkRect: () => bridge.getComposerRect(),
     onFirstInteraction() {
       if (!settings.tutorialSeen) {
         settings.tutorialSeen = true;

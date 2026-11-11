@@ -19,6 +19,7 @@ namespace GoodGPTDesktop
             public string App;
             public string Title;
             public string Address;
+            public System.Windows.Rect ComposerBounds = System.Windows.Rect.Empty;
         }
 
         public sealed class SendResult
@@ -86,15 +87,16 @@ namespace GoodGPTDesktop
                 if (!AddressUnchanged(target, window)) return Fail("Открыт другой диалог. Похвала не отправлена.");
                 if (HasAttachments(window)) return Fail("В поле есть вложение. Оно сохранено; похвала не отправлена.");
                 editor = FindComposer(window, target);
-                if (editor == null) return Fail("Поле сообщения недоступно через специальные возможности приложения. Откройте диалог и щёлкните поле ввода.");
+                if (editor == null) return ScreenComposer.Send(target, message, cancelled, delegate { return SameTarget(target) && AddressUnchanged(target, window); });
                 string current;
-                if (!TryReadEditor(editor, out current)) return Fail("Не удалось проверить черновик. Похвала не отправлена.");
+                if (!TryReadEditor(editor, out current)) return ScreenComposer.Send(target, message, cancelled, delegate { return SameTarget(target) && AddressUnchanged(target, window); });
                 if (Clean(current).Length != 0) return Fail("В поле уже есть черновик. Он сохранён; похвала не отправлена.");
                 if (cancelled() || !SameTarget(target) || !AddressUnchanged(target, window)) return Fail("Окно изменилось. Похвала не отправлена.");
 
                 // The overlay never activates; nevertheless focus the precise composer,
                 // then verify it belongs to the captured target before synthesising input.
-                editor.SetFocus();
+                try { editor.SetFocus(); } catch { return ScreenComposer.Send(target, message, cancelled, delegate { return SameTarget(target) && AddressUnchanged(target, window); }); }
+                target.ComposerBounds = editor.Current.BoundingRectangle;
                 Thread.Sleep(70);
                 if (cancelled() || !SameTarget(target) || !BelongsTo(AutomationElement.FocusedElement, target.Window)) return Fail("Не удалось сфокусировать поле сообщения.");
                 if (!TryReadEditor(editor, out current) || Clean(current).Length != 0) return Fail("Поле изменилось. Черновик оставлен нетронутым.");
@@ -124,39 +126,37 @@ namespace GoodGPTDesktop
                     if (!SendChord(0x56)) return Fail("Windows не разрешила ввод в это окно. Запустите приложения с одинаковыми правами.");
                     inserted = true;
                 }
-                Thread.Sleep(180);
+                for (int pasteAttempt = 0; pasteAttempt < 24; pasteAttempt++)
+                {
+                    if (cancelled() || !SameTarget(target)) break;
+                    string pasted; if (TryReadEditor(editor, out pasted) && Clean(pasted) == Clean(message)) break;
+                    Thread.Sleep(75);
+                }
                 if (cancelled() || !SameTarget(target) || !AddressUnchanged(target, window)) return Fail("Отправка отменена. Проверьте поле сообщения.");
                 if (!TryReadEditor(editor, out current) || Clean(current) != Clean(message)) return Fail("Вставка текста не подтверждена. Проверьте поле сообщения.");
                 if (HasAttachments(window)) return Fail("Появилось вложение. Похвала не отправлена.");
 
                 HashSet<string> previousMessages = MatchingMessages(window, editor, message);
-                AutomationElement sendButton = null;
-                for (int attempt = 0; attempt < 8; attempt++)
+                HashSet<string> oldSteer = SteerIds(window);
+                if (!WaitForModifiers(cancelled) || cancelled() || !SameTarget(target) || !FocusIsComposer(editor)) return Fail("Отправка отменена.");
+                if (!TryReadEditor(editor, out current) || Clean(current) != Clean(message)) return Fail("Текст изменился. Он сохранён.");
+                clicked = true;
+                if (!SendKey(0x0D)) return new SendResult { MayHaveSent = true, Message = "Windows не подтвердила Enter." };
+                // Enter may queue the message while Codex is running. Apply only
+                // the new queued row containing this exact praise.
+                for (int attempt = 0; attempt < 28; attempt++)
                 {
-                    if (cancelled() || !SameTarget(target) || !AddressUnchanged(target, window)) return Fail("Отправка отменена. Проверьте поле сообщения.");
-                    sendButton = FindSendButton(window, editor);
-                    if (sendButton != null) break;
-                    Thread.Sleep(65);
-                }
-                if (cancelled() || !SameTarget(target) || !AddressUnchanged(target, window)) return Fail("Отправка отменена. Проверьте поле сообщения.");
-                if (!TryReadEditor(editor, out current) || Clean(current) != Clean(message)) return Fail("Текст изменился. Он не отправлен автоматически.");
-                if (HasAttachments(window) || !FocusIsComposer(editor)) return Fail("Поле потеряло фокус или появилось вложение. Похвала не отправлена.");
-                object invoke;
-                if (sendButton != null && sendButton.TryGetCurrentPattern(InvokePattern.Pattern, out invoke))
-                {
-                    if (cancelled() || !SameTarget(target) || !AddressUnchanged(target, window) || HasAttachments(window) || !TryReadEditor(editor, out current) || Clean(current) != Clean(message) || !FocusIsComposer(editor)) return Fail("Отправка отменена: поле сообщения изменилось.");
-                    clicked = true;
-                    ((InvokePattern)invoke).Invoke();
-                }
-                else
-                {
-                    if (cancelled() || !SameTarget(target) || !FocusIsComposer(editor)) return Fail("Поле потеряло фокус. Похвала не отправлена.");
-                    if (!WaitForModifiers(cancelled)) return Fail("Отпустите клавиши модификаторов. Похвала оставлена в поле.");
-                    if (cancelled() || !SameTarget(target) || !AddressUnchanged(target, window) || !FocusIsComposer(editor)) return Fail("Отправка отменена.");
-                    if (!TryReadEditor(editor, out current) || Clean(current) != Clean(message) || HasAttachments(window)) return Fail("Поле изменилось. Похвала не отправлена.");
-                    if (cancelled() || !SameTarget(target) || !FocusIsComposer(editor)) return Fail("Поле потеряло фокус. Похвала не отправлена.");
-                    clicked = true;
-                    if (!SendKey(0x0D)) return new SendResult { Message = "Windows не подтвердила нажатие Enter. Проверьте диалог.", MayHaveSent = true };
+                    Thread.Sleep(100);
+                    if (cancelled() || !SameTarget(target) || !AddressUnchanged(target, window)) break;
+                    AutomationElement steer = FindOwnSteer(window, editor, message, oldSteer);
+                    if (steer == null) continue;
+                    object action;
+                    if (steer.TryGetCurrentPattern(InvokePattern.Pattern, out action))
+                    {
+                        if (cancelled() || !SameTarget(target)) break;
+                        ((InvokePattern)action).Invoke();
+                        break;
+                    }
                 }
                 // Never equate clearing an input or pressing Enter with delivery.
                 for (int attempt = 0; attempt < 12; attempt++)
@@ -177,17 +177,7 @@ namespace GoodGPTDesktop
             }
             finally
             {
-                // Only remove our exact untouched draft before an actual send attempt.
-                // Never select-all or clear text that could belong to the user.
-                if (inserted && !clicked && valuePattern != null && target != null && SameTarget(target))
-                {
-                    try
-                    {
-                        string current;
-                        if (TryReadEditor(editor, out current) && Clean(current) == Clean(message)) valuePattern.SetValue("");
-                    }
-                    catch { }
-                }
+                // Keep an inserted draft visible when submission was unavailable.
                 if (changedClipboard)
                 {
                     try
@@ -288,13 +278,14 @@ namespace GoodGPTDesktop
         {
             try
             {
-                if (element.Current.IsOffscreen || !element.Current.IsEnabled || !element.Current.IsKeyboardFocusable) return 0;
+                if (element.Current.IsOffscreen || !element.Current.IsEnabled) return 0;
                 ControlType type = element.Current.ControlType;
                 if (type != ControlType.Edit && type != ControlType.Document) return 0;
                 string id = (element.Current.AutomationId ?? "").ToLowerInvariant();
                 string name = (element.Current.Name ?? "").Trim().ToLowerInvariant();
-                string all = id + " " + name + " " + (element.Current.HelpText ?? "").ToLowerInvariant();
+                string all = id + " " + name + " " + (element.Current.HelpText ?? "").ToLowerInvariant() + " " + (element.Current.ClassName ?? "").ToLowerInvariant();
                 if (all.Contains("terminal") || all.Contains("терминал") || all.Contains("search") || all.Contains("поиск") || all.Contains("address") || all.Contains("адрес") || all.Contains("monaco") || all.Contains("source editor") || all.Contains("редактор кода")) return 0;
+                if (all.Contains("prosemirror") || all.Contains("tiptap")) return 135;
                 if (id.Contains("prompt-textarea") || id.Contains("claude-textarea") || id == "chat-input") return 140;
                 if (id.Contains("composer") || id.Contains("chat-input")) return 120;
                 if (name.Contains("ask codex") || name.Contains("message codex") || name.Contains("ask chatgpt") || name.Contains("message chatgpt") || name.Contains("сообщение chatgpt") || name.Contains("сообщение codex")) return 110;
@@ -305,6 +296,52 @@ namespace GoodGPTDesktop
             }
             catch { }
             return 0;
+        }
+
+        public System.Windows.Rect LocateComposerBounds(TargetInfo target)
+        {
+            try
+            {
+                if (!SameTarget(target)) return System.Windows.Rect.Empty;
+                AutomationElement window = AutomationElement.FromHandle(target.Window);
+                AutomationElement editor = FindComposer(window, target);
+                System.Windows.Rect bounds = editor != null ? editor.Current.BoundingRectangle : ScreenComposer.InputBounds(ScreenComposer.Read(target.Window));
+                if (SameTarget(target)) target.ComposerBounds = bounds;
+                return bounds;
+            }
+            catch { return System.Windows.Rect.Empty; }
+        }
+
+        private static string Identity(AutomationElement element)
+        {
+            try { return String.Join(".", Array.ConvertAll(element.GetRuntimeId(), delegate(int value) { return value.ToString(); })); } catch { return ""; }
+        }
+        private static bool SteerLabel(AutomationElement element)
+        {
+            try { return element.Current.IsEnabled && !element.Current.IsOffscreen && ScreenComposer.IsSteer(element.Current.Name); } catch { return false; }
+        }
+        private static HashSet<string> SteerIds(AutomationElement window)
+        {
+            HashSet<string> ids = new HashSet<string>();
+            foreach (AutomationElement button in window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)))
+                if (SteerLabel(button)) ids.Add(Identity(button));
+            return ids;
+        }
+        private static AutomationElement FindOwnSteer(AutomationElement window, AutomationElement editor, string message, HashSet<string> before)
+        {
+            foreach (AutomationElement button in window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)))
+            {
+                if (!SteerLabel(button) || before.Contains(Identity(button))) continue;
+                AutomationElement row = TreeWalker.RawViewWalker.GetParent(button);
+                for (int depth = 0; row != null && depth < 5 && !Automation.Compare(row, window); depth++, row = TreeWalker.RawViewWalker.GetParent(row))
+                {
+                    if (Inside(editor, row)) break;
+                    if (Clean(row.Current.Name).Contains(Clean(message))) return button;
+                    foreach (AutomationElement text in row.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)))
+                        if (Clean(text.Current.Name).Contains(Clean(message))) return button;
+                }
+            }
+            return null;
         }
 
         private static bool TryReadEditor(AutomationElement editor, out string text)
@@ -415,7 +452,7 @@ namespace GoodGPTDesktop
             return false;
         }
 
-        private static Forms.DataObject SnapshotClipboard()
+        internal static Forms.DataObject SnapshotClipboard()
         {
             Forms.IDataObject source = Forms.Clipboard.GetDataObject();
             if (source == null) return null;
@@ -439,7 +476,7 @@ namespace GoodGPTDesktop
             return snapshot;
         }
 
-        private static bool WaitForModifiers(Func<bool> cancelled)
+        internal static bool WaitForModifiers(Func<bool> cancelled)
         {
             for (int attempt = 0; attempt < 35; attempt++)
             {
@@ -454,12 +491,12 @@ namespace GoodGPTDesktop
         private static string Clean(string text) { return (text ?? "").Replace("\u200B", "").Replace("\uFEFF", "").Trim(); }
         private static string WindowTitle(IntPtr window) { System.Text.StringBuilder text = new System.Text.StringBuilder(1024); GetWindowText(window, text, text.Capacity); return text.ToString(); }
 
-        private static bool SendChord(ushort key)
+        internal static bool SendChord(ushort key)
         {
             INPUT[] inputs = { Keyboard(VK_CONTROL, false), Keyboard(key, false), Keyboard(key, true), Keyboard(VK_CONTROL, true) };
             return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
         }
-        private static bool SendKey(ushort key)
+        internal static bool SendKey(ushort key)
         {
             INPUT[] inputs = { Keyboard(key, false), Keyboard(key, true) };
             return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;

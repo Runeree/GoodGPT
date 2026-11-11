@@ -8,13 +8,16 @@ const uid = () => globalThis.crypto?.randomUUID?.() || `pour-${Date.now()}-${Mat
 
 /** A small, self-contained physical scene. The host page never becomes a drag surface. */
 export class GoodGPTScene {
-  constructor({ root, assets, onReward = () => {}, onStatus = () => {}, reducedMotion = false, onFirstInteraction = () => {} }) {
+  constructor({ root, assets, onReward = () => {}, onStatus = () => {}, reducedMotion = false, onFirstInteraction = () => {}, getSinkRect = () => null }) {
     this.root = root;
     this.doc = root.ownerDocument || document;
     this.win = this.doc.defaultView || window;
     this.onReward = onReward;
     this.onStatus = onStatus;
     this.onFirstInteraction = onFirstInteraction;
+    this.getSinkRect = getSinkRect;
+    this.sinkRect = null;
+    this.nextSinkCheck = 0;
     this.reducedMotion = reducedMotion;
     this.enabled = true;
     this.destroyed = false;
@@ -358,6 +361,12 @@ export class GoodGPTScene {
         treat.spin *= -0.7;
       }
     }
+    if (this.treats.length && this.elapsed >= this.nextSinkCheck) {
+      this.nextSinkCheck = this.elapsed + 0.15;
+      this.sinkRect = this.getSinkRect();
+    }
+    const sink = this.sinkRect;
+    if (sink) this.treats = this.treats.filter(t => t.x + t.radius < sink.left || t.x - t.radius > sink.right || t.y + t.radius < sink.top || t.y - t.radius > sink.bottom);
     // Circle contact solver: varying sizes, mass proportional to area, modest restitution.
     for (let a = 0; a < this.treats.length; a++) {
       for (let b = a + 1; b < this.treats.length; b++) {

@@ -37,7 +37,7 @@ function run(argv) {
     treats: [], fibers: [], poured: 0, rewarded: false, accumulator: 0,
     pointer: null, frozenTarget: null, currentTarget: null,
     notice: '', noticeUntil: 0, lastPraise: '', send: null,
-    nextDetect: 0, lastTick: Date.now() / 1000, frame: 0,
+    sink: null, nextDetect: 0, lastTick: Date.now() / 1000, frame: 0,
     screen: null, width: 0, height: 0, homeX: 0, homeY: 121,
     lastPermissionPrompt: 0, escapeWasDown: false
   };
@@ -204,10 +204,23 @@ function run(argv) {
       if (candidate > score) { best = nodes[i]; score = candidate; }
     }
     if (!best) return { reason: 'Откройте поле сообщения Codex или Claude (Code) и попробуйте снова.' };
+    state.sink = composerBounds(best);
     var raw = attribute(best, 'AXValue');
     if (raw === null) return { reason: 'Не удалось прочитать поле сообщения. Ничего не отправлено.' };
     if (normal(str(raw))) return { reason: 'В поле есть ваш черновик. GoodGPT оставил его без изменений.' };
     return { editor: best, nodes: nodes };
+  }
+  function isSteer(element) {
+    if (attrText(element, 'AXRole') !== 'AXButton' || !boolAttribute(element, 'AXEnabled', true)) return false;
+    return /^(?:steer(?: now)?|скорректировать(?: промпт)?)$/i.test(normal(attrText(element, 'AXTitle') || attrText(element, 'AXDescription')));
+  }
+  function composerBounds(editor) {
+    try {
+      var p = Ref($.NSMakePoint(0, 0)), z = Ref($.NSMakeSize(0, 0));
+      if (!$.AXValueGetValue(attribute(editor, 'AXPosition'), 1, p) || !$.AXValueGetValue(attribute(editor, 'AXSize'), 2, z)) return null;
+      var point = p[0], size = z[0], main = $.NSScreen.screens.objectAtIndex(0).frame;
+      return { left: point.x - state.screen.minX, top: point.y + state.screen.maxY - main.origin.y - main.size.height, width: size.width, height: size.height };
+    } catch (_) { return null; }
   }
   function key(code, flags) {
     var down = $.CGEventCreateKeyboardEvent(null, code, true);
@@ -292,28 +305,35 @@ function run(argv) {
     }
     if (job.phase === 'pasted' && state.elapsed - job.at > 0.13) {
       if (normal(attrText(job.editor, 'AXValue')) !== normal(job.message)) {
+        if (state.elapsed - job.at < 2) return;
         restoreClipboard(job); state.send = null; notice('Вставка не подтверждена. Проверьте поле сообщения.', 6); return;
       }
-      var nodes = walk(job.target.window, 350), button = null;
-      for (var i = 0; i < nodes.length; i++) {
-        if (attrText(nodes[i], 'AXRole') !== 'AXButton' || !boolAttribute(nodes[i], 'AXEnabled', true)) continue;
-        var text = description(nodes[i]).trim();
-        if (/stop|cancel|interrupt|останов|отмен|прервать/.test(text)) continue;
-        if (/add to queue|queue message|^queue$|send follow.up|^steer$|в очередь/.test(text)) { button = nodes[i]; break; }
-        if (/send message|send prompt|send now|отправить сообщение|отправить запрос|^send$|^отправить$/.test(text)) button = nodes[i];
+      if (!stillTarget(job.target) || !sameElement(attribute(job.target.app, 'AXFocusedUIElement'), job.editor)) {
+        restoreClipboard(job); state.send = null; return;
       }
-      // AX traversal can yield to another app. Check the actual focused editor
-      // again immediately before any button action or Return is posted.
-      if (!stillTarget(job.target) || !sameElement(attribute(job.target.app, 'AXFocusedUIElement'), job.editor) || normal(attrText(job.editor, 'AXValue')) !== normal(job.message)) {
-        restoreClipboard(job); state.send = null; notice('Фокус или текст изменились. Отправка отменена.', 6); return;
-      }
-      // Ordinary accessibility button press; Return is the ordinary UI fallback.
-      job.clicked = true;
-      if (button) $.AXUIElementPerformAction(button, $('AXPress'));
-      else if (stillTarget(job.target) && sameElement(attribute(job.target.app, 'AXFocusedUIElement'), job.editor) && normal(attrText(job.editor, 'AXValue')) === normal(job.message)) key(36, 0);
-      job.phase = 'confirm'; job.at = state.elapsed;
-      // Leave clipboard available long enough for the target's paste handler.
+      job.oldSteer = walk(job.target.window, 350).filter(function (node) { return isSteer(node); });
+      job.clicked = key(36, 0);
+      job.phase = 'queued'; job.at = state.elapsed; job.lastProbe = 0;
+      job.deadline = state.elapsed + 5;
       restoreClipboard(job);
+    } else if (job.phase === 'queued') {
+      if (state.elapsed - job.lastProbe < 0.15) return;
+      job.lastProbe = state.elapsed;
+      var candidates = walk(job.target.window, 350);
+      for (var n = 0; n < candidates.length; n++) {
+        var button = candidates[n];
+        if (!isSteer(button) || job.oldSteer.some(function (old) { return sameElement(old, button); })) continue;
+        var row = attribute(button, 'AXParent'), own = false;
+        for (var depth = 0; row && depth < 5 && !sameElement(row, job.target.window); depth++, row = attribute(row, 'AXParent')) {
+          var values = walk(row, 70);
+          if (values.some(function (node) { return sameElement(node, job.editor); })) break;
+          if (values.some(function (node) { return normal(attrText(node, 'AXValue') + ' ' + attrText(node, 'AXTitle') + ' ' + attrText(node, 'AXDescription')).indexOf(normal(job.message)) >= 0; })) { own = true; break; }
+        }
+        if (own && stillTarget(job.target) && $.AXUIElementPerformAction(button, $('AXPress')) === 0) {
+          job.phase = 'confirm'; job.at = state.elapsed; job.deadline = state.elapsed + 2; return;
+        }
+      }
+      if (state.elapsed >= job.deadline) { state.send = null; notice('Enter выполнен. Проверьте диалог или очередь.', 5); }
     } else if (job.phase === 'confirm' && state.elapsed - job.at > 0.35) {
       var after = walk(job.target.window, 350);
       if (countMessage(after, job.message, job.editor) > job.oldCount) {
@@ -388,6 +408,7 @@ function run(argv) {
     var point = mousePoint();
     if (!hitBag(point)) return;
     state.frozenTarget = detectTarget();
+    state.sink = state.frozenTarget ? composerBounds(attribute(state.frozenTarget.app, 'AXFocusedUIElement')) : null;
     state.pointer = { x: point.x, y: point.y, startX: point.x, startY: point.y, offsetX: state.x - point.x, offsetY: state.y - point.y, last: state.elapsed, speed: 0 };
     if (state.mode === 'hung' || state.mode === 'returning') state.mode = 'tension'; else state.mode = 'dragging';
     panel.ignoresMouseEvents = false;
@@ -466,6 +487,7 @@ function run(argv) {
       if (t.y + t.radius > floor) { t.y = floor - t.radius; t.vy = Math.abs(t.vy) < 26 ? 0 : -Math.abs(t.vy) * 0.43; t.vx *= Math.exp(-3.2 * dt); t.spin *= Math.exp(-3.5 * dt); }
       if (t.x - t.radius < 0 || t.x + t.radius > state.width) { t.x = clamp(t.x, t.radius, state.width - t.radius); t.vx *= -0.5; }
     });
+    if (state.sink) state.treats = state.treats.filter(function (t) { var r = state.sink; return t.x + t.radius < r.left || t.x - t.radius > r.left + r.width || t.y + t.radius < r.top || t.y - t.radius > r.top + r.height; });
     for (var a = 0; a < state.treats.length; a++) for (var b = a + 1; b < state.treats.length; b++) {
       var p = state.treats[a], q = state.treats[b], dx = q.x - p.x, dy = q.y - p.y, d = Math.sqrt(dx * dx + dy * dy), contact = p.radius + q.radius;
       if (d < 0.001 || d >= contact) continue;

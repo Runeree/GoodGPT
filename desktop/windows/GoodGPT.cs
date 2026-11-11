@@ -110,7 +110,8 @@ namespace GoodGPTDesktop
         private NativeSender.TargetInfo detected, grabbed;
         private readonly SceneSurface surface;
         private readonly Forms.NotifyIcon tray;
-        private readonly Forms.ToolStripMenuItem targetItem, pauseItem, copyItem;
+        private readonly Forms.ToolStripMenuItem targetItem, pauseItem, copyItem, feedbackItem;
+        private Rect sinkBounds = Rect.Empty;
         private readonly DispatcherTimer timer;
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private readonly Random random = new Random();
@@ -147,11 +148,12 @@ namespace GoodGPTDesktop
             tray.Text = "GoodGPT — откройте Codex или Claude (Code)"; tray.Visible = true;
             Forms.ContextMenuStrip menu = new Forms.ContextMenuStrip();
             targetItem = new Forms.ToolStripMenuItem("Codex / Claude Code не активны"); targetItem.Enabled = false;
+            feedbackItem = new Forms.ToolStripMenuItem("Похвала ещё не отправлялась"); feedbackItem.Enabled = false;
             pauseItem = new Forms.ToolStripMenuItem("Приостановить"); pauseItem.Click += delegate { paused = !paused; Interlocked.Increment(ref sendGeneration); pauseItem.Text = paused ? "Продолжить" : "Приостановить"; Reset(true); surface.Visibility = paused ? Visibility.Hidden : Visibility.Visible; if (timer != null) timer.Interval = TimeSpan.FromMilliseconds(paused ? 100 : 16); };
             Forms.ToolStripMenuItem restore = new Forms.ToolStripMenuItem("Вернуть мешок наверх"); restore.Click += delegate { Reset(false); };
             copyItem = new Forms.ToolStripMenuItem("Скопировать последнюю похвалу"); copyItem.Enabled = false; copyItem.Click += delegate { try { Clipboard.SetText(lastPraiseText); } catch { } };
             Forms.ToolStripMenuItem quit = new Forms.ToolStripMenuItem("Выйти из GoodGPT"); quit.Click += delegate { Close(); };
-            menu.Items.AddRange(new Forms.ToolStripItem[] { targetItem, new Forms.ToolStripSeparator(), pauseItem, restore, copyItem, new Forms.ToolStripSeparator(), quit }); tray.ContextMenuStrip = menu;
+            menu.Items.AddRange(new Forms.ToolStripItem[] { targetItem, feedbackItem, new Forms.ToolStripSeparator(), pauseItem, restore, copyItem, new Forms.ToolStripSeparator(), quit }); tray.ContextMenuStrip = menu;
             tray.DoubleClick += delegate { Reset(false); ShowNotice("Потяните вниз. Колёсико или Shift + движение — перевернуть.", 7); };
             SourceInitialized += OnSourceInitialized;
             MouseLeftButtonDown += OnMouseDown; MouseMove += OnMouseMove; MouseLeftButtonUp += OnMouseUp;
@@ -201,6 +203,13 @@ namespace GoodGPTDesktop
                 ShowNotice("Сначала откройте Codex или Claude (Code) и выберите нужный чат.", 6); return;
             }
             held = true; CaptureMouse(); Cursor = Cursors.Hand;
+            sinkBounds = Rect.Empty;
+            NativeSender.TargetInfo captureTarget = grabbed;
+            Thread locate = new Thread(delegate()
+            {
+                Rect bounds = sender.LocateComposerBounds(captureTarget);
+                if (!disposed) Dispatcher.BeginInvoke(new Action(delegate { if (detected != null && detected.Window == captureTarget.Window) UpdateSink(bounds); }));
+            }); locate.IsBackground = true; locate.SetApartmentState(ApartmentState.STA); locate.Start();
             startX = lastX = point.X; startY = lastY = point.Y;
             offsetX = x - point.X; offsetY = y - point.Y; lastPointerTime = elapsed; speed = 0;
             if (mode == "hung" || mode == "returning") { mode = "tension"; targetAngle = 0; }
@@ -280,7 +289,7 @@ namespace GoodGPTDesktop
             if (handle != IntPtr.Zero && Win32.GetCursorPos(out cursor))
             {
                 Point point = PointFromScreen(new Point(cursor.X, cursor.Y));
-                bool through = paused || (!held && !BagHit(point));
+                bool through = paused || sending || (!held && !BagHit(point));
                 if (through != clickThrough) { clickThrough = through; Win32.SetStyle(handle, baseStyle | (through ? Win32.WS_EX_TRANSPARENT : 0)); }
             }
             if (paused) return;
@@ -359,6 +368,7 @@ namespace GoodGPTDesktop
                 if (treat.Y + treat.Radius > floor) { treat.Y = floor - treat.Radius; treat.VY = Math.Abs(treat.VY) < 26 ? 0 : -Math.Abs(treat.VY) * 0.43; treat.VX *= Math.Exp(-3.2 * dt); treat.Spin *= Math.Exp(-3.5 * dt); }
                 if (treat.X - treat.Radius < leftBound || treat.X + treat.Radius > rightBound) { treat.X = Clamp(treat.X, leftBound + treat.Radius, rightBound - treat.Radius); treat.VX *= -0.5; treat.Spin *= -0.7; }
             }
+            treats.RemoveAll(delegate(Treat p) { return p.Age > p.Life || (!sinkBounds.IsEmpty && sinkBounds.IntersectsWith(new Rect(p.X - p.Radius, p.Y - p.Radius, p.Radius * 2, p.Radius * 2))); });
             for (int a = 0; a < treats.Count; a++) for (int b = a + 1; b < treats.Count; b++) Collide(treats[a], treats[b]);
             foreach (Treat treat in treats) treat.Y = Math.Min(treat.Y, floor - treat.Radius);
             treats.RemoveAll(delegate(Treat p) { return p.Age > p.Life; });
@@ -394,6 +404,10 @@ namespace GoodGPTDesktop
             lastPraiseText = Praise[choice]; copyItem.Enabled = true; string message = lastPraiseText;
             int generation = Interlocked.Increment(ref sendGeneration);
             sending = true; ShowNotice("Отправляем похвалу в " + target.App + "…", 15);
+            // The target must receive a real click when OCR is needed. End the
+            // completed pour and release the transparent overlay's mouse capture.
+            held = false; ReleaseMouseCapture(); Cursor = Cursors.Arrow; mode = "free"; releaseAt = elapsed;
+            if (handle != IntPtr.Zero) { clickThrough = true; Win32.SetStyle(handle, baseStyle | Win32.WS_EX_TRANSPARENT); }
             Thread worker = new Thread(delegate()
             {
                 NativeSender.SendResult result;
@@ -404,12 +418,20 @@ namespace GoodGPTDesktop
                     if (disposed) return;
                     if (Thread.VolatileRead(ref sendGeneration) != generation) { sending = false; return; }
                     string feedback = String.IsNullOrWhiteSpace(result.Message) ? "Похвала не отправлена. Проверьте активный чат." : result.Message;
+                    UpdateSink(target.ComposerBounds);
                     sending = false; ShowNotice(result.Success ? "Благодарность отправлена в " + target.App + "." : feedback, result.Success ? 5 : 12);
                 }));
             }); worker.IsBackground = true; worker.SetApartmentState(ApartmentState.STA); worker.Start();
         }
 
-        private void ShowNotice(string text, double seconds) { notice = text; }
+        private void ShowNotice(string text, double seconds) { notice = text; if (feedbackItem != null) feedbackItem.Text = text; }
+
+        private void UpdateSink(Rect screenBounds)
+        {
+            if (screenBounds.IsEmpty || screenBounds.Width < 2 || screenBounds.Height < 2) return;
+            Point topLeft = PointFromScreen(screenBounds.TopLeft), bottomRight = PointFromScreen(screenBounds.BottomRight);
+            sinkBounds = new Rect(topLeft, bottomRight);
+        }
 
         private void Reset(bool immediately)
         {

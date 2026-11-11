@@ -174,19 +174,23 @@ if (mode==='release') {
   let release=await api(`${repoPath}/releases/tags/${tag}`,{allow404:true});
   if (!release) release=await api(`${repoPath}/releases`,{method:'POST',body:{tag_name:tag,target_commitish:repo.default_branch,name:'GoodGPT '+version,body,draft:true,prerelease:false}});
   const names=['GoodGPT-Windows.exe','GoodGPT-macOS.zip','GoodGPT-Chrome.zip','GoodGPT-All.zip','SHA256SUMS.txt'];
-  for (const assetName of names) {
+  async function uploadAsset(assetName) {
     const data=await readFile(resolve(root,'dist',assetName));
     const digest='sha256:'+createHash('sha256').update(data).digest('hex');
     const present=release.assets.find(asset=>asset.name===assetName);
     if (present) {
-      if (present.digest===digest) {console.log(`Asset already uploaded: ${assetName}`);continue;}
+      if (present.digest===digest) {console.log(`Asset already uploaded: ${assetName}`);return;}
       throw new Error(`Release already contains a different ${assetName}; refusing to overwrite.`);
     }
     const base=release.upload_url.split('{')[0];
-    const asset=await api(`${base}?name=${encodeURIComponent(assetName)}`,{method:'POST',body:data,binary:true,timeout:180000});
+    const asset=await api(`${base}?name=${encodeURIComponent(assetName)}`,{method:'POST',body:data,binary:true,timeout:300000});
     if (asset.size!==data.length || (asset.digest && asset.digest!==digest)) throw new Error('Uploaded asset integrity mismatch: '+assetName);
     console.log(`Uploaded: ${asset.name} (${asset.size} bytes)`);
   }
+  let nextAsset = 0;
+  await Promise.all(Array.from({length:3}, async () => {
+    for (;;) { const index = nextAsset++; if (index >= names.length) return; await uploadAsset(names[index]); }
+  }));
   if(release.draft) release=await api(`${repoPath}/releases/${release.id}`,{method:'PATCH',body:{draft:false,body}});
   console.log(`Release published: ${release.html_url}`);
   process.exit(0);
@@ -199,4 +203,3 @@ if (mode==='verify') {
   if (files.some(path=>/\.pem$|\.crx$|(?:^|\/)\.env$/.test(path))) throw new Error('Unexpected private/generated file in public tree.');
   console.log(JSON.stringify({repository:repo.html_url,public:!repo.private,files:files.length,release:release.html_url,assets:release.assets.map(asset=>({name:asset.name,size:asset.size,url:asset.browser_download_url,digest:asset.digest})),sourceArchive:`${repo.html_url}/archive/refs/tags/${release.tag_name}.zip`},null,2));
 }
-

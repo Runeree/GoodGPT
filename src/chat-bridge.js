@@ -21,6 +21,9 @@ const COMPOSER_SELECTORS = [
   '[data-testid="composer-input"][contenteditable="true"]',
   'form [contenteditable="true"][role="textbox"]',
   'textarea[data-testid="prompt-textarea"]',
+  '.ProseMirror[contenteditable="true"]',
+  '.tiptap[contenteditable="true"]',
+  '[role="textbox"][contenteditable="true"]',
 ];
 const SEND_SELECTORS = [
   'button[aria-label="Add to queue"]',
@@ -116,7 +119,29 @@ function insertText(editor, message) {
   selection.removeAllRanges();
   selection.addRange(range);
   doc.execCommand('insertText', false, message);
+  if (!editorText(editor)) {
+    const transfer = new doc.defaultView.DataTransfer();
+    transfer.setData('text/plain', message);
+    editor.dispatchEvent(new doc.defaultView.ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+  }
   return editorText(editor) === normalise(message);
+}
+
+function steerLabel(button) {
+  const label = normalise(button.getAttribute('aria-label') || button.textContent);
+  return /^(?:steer(?: now)?|скорректировать(?: промпт)?)$/i.test(label);
+}
+
+function findOwnSteer(doc, message, previous) {
+  for (const button of doc.querySelectorAll('button')) {
+    if (previous.has(button) || !visible(button) || button.disabled || !steerLabel(button)) continue;
+    let row = button.parentElement;
+    for (let depth = 0; row && depth < 5 && row !== doc.body; depth++, row = row.parentElement) {
+      if (row.querySelector(COMPOSER_SELECTORS.join(','))) break;
+      if (normalise(row.innerText || row.textContent).includes(normalise(message))) return button;
+    }
+  }
+  return null;
 }
 
 function removeOwnDraft(editor, message) {
@@ -150,6 +175,11 @@ export class ChatBridge {
 
   getRouteKey() {
     return `${location.origin}${location.pathname}${location.search}`;
+  }
+
+  getComposerRect() {
+    const editor = findVisible(document, COMPOSER_SELECTORS);
+    return editor ? (editor.closest('form') || editor).getBoundingClientRect() : null;
   }
 
   // The route poller and confirmation loop share one locked assignment. Keep
@@ -248,17 +278,23 @@ export class ChatBridge {
         return this.result('fallback', message, 'Поле сообщения изменилось. Проверьте текст перед отправкой.');
       }
       const oldTurns = new Set(userTurns(document));
+      const previousSteer = new Set([...document.querySelectorAll('button')].filter(steerLabel));
       this.phase('sending', message);
       submission = { from: routeKey, to: null, expiresAt: performance.now() + this.timeoutMs };
       this.submission = submission;
       clicked = true;
       sendButton.click();
+      let steered = false;
       const deadline = submission.expiresAt;
       while (performance.now() < deadline) {
         // The first / -> /c/<id> transition belongs to this submission even
         // if React has not rendered its outgoing user turn yet.
         if (changed()) {
           return this.result('cancelled', message, 'Чат изменился после нажатия отправки. Проверьте предыдущий диалог перед повтором.', { mayHaveSent: true });
+        }
+        if (!steered) {
+          const steer = findOwnSteer(document, message, previousSteer);
+          if (steer) { steered = true; steer.click(); }
         }
         const newTurn = userTurns(document).find((turn) => !oldTurns.has(turn) && normalise(turn.innerText || turn.textContent) === normalise(message));
         // ChatGPT may assign /c/<id> to a new conversation on submission.
