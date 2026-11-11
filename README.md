@@ -108,4 +108,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1
 
 Похвала остаётся обычным сообщением в текущем диалоге и не меняет веса модели. Проект неофициальный, не связан с OpenAI или Anthropic.
 
-Автор: [Stepan Konovalov](https://github.com/Runeree). Код: [MIT](LICENSE). Описание графики: [assets/README.md](assets/README.md).
+Автор: [Runeree](https://github.com/Runeree). Код: [MIT](LICENSE). Описание графики: [assets/README.md](assets/README.md).
