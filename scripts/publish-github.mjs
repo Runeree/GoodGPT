@@ -159,8 +159,20 @@ if (mode==='upload') {
 if (mode==='release') {
   const version=JSON.parse(await readFile(resolve(root,'package.json'),'utf8')).version;
   const tag='v'+version, body=await readFile(resolve(root,'RELEASE.md'),'utf8');
+  const runs=await api(`${repoPath}/actions/runs?branch=${encodeURIComponent('release/'+version)}&per_page=10`);
+  for(const run of runs.workflow_runs || []) {
+    if(run.path!=='.github/workflows/release.yml' || run.status==='completed') continue;
+    try {
+      await api(`${repoPath}/actions/runs/${run.id}/cancel`,{method:'POST'});
+      console.log(`Stopped duplicate build: ${run.id}`);
+    } catch(error) {
+      if(!String(error.message).includes(': 409 ')) throw error;
+      console.log(`Build has no allocated runner: ${run.id}. Publishing existing packages.`);
+    }
+  }
+  await api(repoPath,{method:'PATCH',body:{description:'GoodGPT: угощения и похвала для Codex (ChatGPT) и Claude Code. Windows, macOS и Chrome.'}});
   let release=await api(`${repoPath}/releases/tags/${tag}`,{allow404:true});
-  if (!release) release=await api(`${repoPath}/releases`,{method:'POST',body:{tag_name:tag,target_commitish:repo.default_branch,name:'GoodGPT '+version,body,draft:false,prerelease:false}});
+  if (!release) release=await api(`${repoPath}/releases`,{method:'POST',body:{tag_name:tag,target_commitish:repo.default_branch,name:'GoodGPT '+version,body,draft:true,prerelease:false}});
   const names=['GoodGPT-Windows.exe','GoodGPT-macOS.zip','GoodGPT-Chrome.zip','GoodGPT-All.zip','SHA256SUMS.txt'];
   for (const assetName of names) {
     const data=await readFile(resolve(root,'dist',assetName));
@@ -175,6 +187,7 @@ if (mode==='release') {
     if (asset.size!==data.length || (asset.digest && asset.digest!==digest)) throw new Error('Uploaded asset integrity mismatch: '+assetName);
     console.log(`Uploaded: ${asset.name} (${asset.size} bytes)`);
   }
+  if(release.draft) release=await api(`${repoPath}/releases/${release.id}`,{method:'PATCH',body:{draft:false,body}});
   console.log(`Release published: ${release.html_url}`);
   process.exit(0);
 }
@@ -186,3 +199,4 @@ if (mode==='verify') {
   if (files.some(path=>/\.pem$|\.crx$|(?:^|\/)\.env$/.test(path))) throw new Error('Unexpected private/generated file in public tree.');
   console.log(JSON.stringify({repository:repo.html_url,public:!repo.private,files:files.length,release:release.html_url,assets:release.assets.map(asset=>({name:asset.name,size:asset.size,url:asset.browser_download_url,digest:asset.digest})),sourceArchive:`${repo.html_url}/archive/refs/tags/${release.tag_name}.zip`},null,2));
 }
+
