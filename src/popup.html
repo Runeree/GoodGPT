@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GoodGPT</title><link rel="stylesheet" href="popup.css"></head>
+<body>
+  <header><div><span class="eyebrow">НЕМНОГО БЛАГОДАРНОСТИ</span><h1>GoodGPT<span>.</span></h1><p>За хорошо сделанную работу.</p></div><img src="assets/bag.png" alt="Мешочек с угощениями" width="82" height="94"></header>
+  <main>
+    <label class="setting"><span>Мешочек в ChatGPT</span><input id="enabled" type="checkbox" checked><span class="toggle" aria-hidden="true"></span></label>
+    <label class="setting gentle"><span>Меньше движения</span><input id="gentle" type="checkbox"><span class="toggle" aria-hidden="true"></span></label>
+    <div class="instructions"><p><span>01</span>Потяните мешок вниз.</p><p><span>02</span>Переверните колёсиком или<br>зажмите Shift и двигайте мышь.</p><p><span>03</span>Угощение высыплется —<br>похвала отправится в чат.</p></div>
+    <button id="reset" type="button">Вернуть мешок наверх <span aria-hidden="true">↗</span></button><p id="status" role="status"></p>
+  </main>
+  <footer>Добрые слова в текущем диалоге.<br>Никаких обещаний изменить интеллект модели.<span class="keyboard">Клавиатура: пробел → стрелки → Enter.<br>Escape возвращает мешок.</span></footer>
+  <script src="popup.js"></script>
+</body>
+</html>

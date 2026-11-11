@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GoodGPT — локальная проверка</title>
+  <style>
+    :root { color-scheme:dark; font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:#ecebe7; background:#212120; }
+    * { box-sizing:border-box }
+    body { margin:0; min-height:100vh }
+    header { height:68px; display:flex; align-items:center; justify-content:space-between; padding:0 28px; border-bottom:1px solid #ffffff08 }
+    .wordmark { font-size:18px; letter-spacing:-.5px; font-weight:600 }
+    .local { font-size:11px; color:#a7a49a; letter-spacing:.09em; text-transform:uppercase }
+    main { max-width:764px; margin:65px auto 210px; padding:0 26px }
+    .date { margin:0 0 36px; font-size:12px; color:#939189; letter-spacing:.08em }
+    article { margin:0 0 30px }
+    article[data-message-author-role=user] { margin-left:auto; width:fit-content; max-width:85%; padding:12px 20px; border-radius:24px; background:#30302e }
+    .assistant-label { display:block; margin-bottom:13px; font-size:12px; font-weight:600; color:#a9a69e }
+    p { margin:0 0 14px }
+    p:last-child { margin-bottom:0 }
+    .sample-title { font-size:23px; font-weight:550; line-height:1.35; letter-spacing:-.5px; margin:0 0 20px }
+    ol { padding-left:22px; margin:18px 0 }
+    li { padding:4px 0 4px 6px }
+    .composer-zone { position:fixed; left:0; right:0; bottom:0; padding:20px 24px 14px; background:linear-gradient(transparent,#212120 20%); }
+    form { position:relative; max-width:712px; min-height:112px; margin:auto; border:1px solid #ffffff17; border-radius:27px; padding:17px 58px 22px 22px; background:#30302e; box-shadow:0 12px 50px #0001 }
+    #prompt-textarea { min-height:44px; outline:none; max-height:160px; overflow:auto; line-height:1.5; cursor:text }
+    #prompt-textarea:empty::before { content:"Спросите что-нибудь"; color:#a6a39b; pointer-events:none }
+    #prompt-textarea p { margin:0 }
+    button { position:absolute; right:14px; bottom:14px; border:0; border-radius:50%; width:34px; height:34px; background:#edede8; color:#212120; cursor:pointer; display:grid; place-items:center }
+    button:disabled { background:#55544f; color:#98958c; cursor:default }
+    button svg { width:18px; height:18px }
+    .footnote { max-width:712px; text-align:center; margin:10px auto 0; font-size:11px; color:#8d8a82 }
+    @media(max-width:600px) { header { padding:0 18px } main { margin-top:40px; padding:0 22px } .local { letter-spacing:0; font-size:10px } }
+  </style>
+</head>
+<body>
+  <header><span class="wordmark">GoodGPT / sandbox</span><span class="local">Локальная проверка · сообщения остаются здесь</span></header>
+  <main id="conversation">
+    <p class="date">СЕГОДНЯ</p>
+    <article data-message-author-role="user" data-message-id="initial-user"><p>Как сделать обратную связь чуть теплее?</p></article>
+    <article data-message-author-role="assistant" data-message-id="initial-assistant"><span class="assistant-label">Ассистент</span><p class="sample-title">Замечать то, что получилось.</p><p>Иногда для хорошей обратной связи хватает одной точной, человеческой фразы. Назовите результат и расскажите, что именно вам понравилось.</p><ol><li><strong>Будьте конкретны.</strong> «Ты хорошо объяснил сложную идею» полезнее общей оценки.</li><li><strong>Скажите это вовремя.</strong> Когда результат ещё перед глазами, похвала понятнее.</li><li><strong>Добавьте немного игры.</strong> Маленький ритуал делает обычное «спасибо» заметнее.</li></ol><p>Попробуйте мешочек наверху: потяните его вниз, затем переверните колёсиком мыши.</p></article>
+  </main>
+  <div class="composer-zone">
+    <form id="composer-form">
+      <div id="prompt-textarea" class="ProseMirror" contenteditable="true" role="textbox" aria-label="Сообщение" aria-multiline="true" data-placeholder="Спросите что-нибудь"></div>
+      <button type="submit" data-testid="send-button" aria-label="Отправить сообщение" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" aria-hidden="true"><path d="M12 20V4m-6 6 6-6 6 6"/></svg></button>
+    </form>
+    <p class="footnote">Тестовый интерфейс GoodGPT. Это локальная страница, без связи с ChatGPT.</p>
+  </div>
+  <script>
+    (() => {
+      const composer=document.querySelector('#prompt-textarea');
+      const form=document.querySelector('#composer-form');
+      const button=document.querySelector('[data-testid="send-button"]');
+      const conversation=document.querySelector('#conversation');
+      const messages=[];
+      let busy=false, forcedDisabled=false, queueEnabled=false, stopClicks=0, counter=0, responseTimer;
+      const text=()=>composer.innerText.trim();
+      const sync=()=>{ button.disabled=(busy&&!queueEnabled)||forcedDisabled||!text(); button.setAttribute('aria-label',busy&&queueEnabled?'Add to queue':'Отправить сообщение'); };
+      const add=(role,value)=>{
+        const article=document.createElement('article');
+        article.dataset.messageAuthorRole=role;
+        article.dataset.messageId='fixture-'+(++counter);
+        const p=document.createElement('p'); p.textContent=value; article.append(p);
+        conversation.append(article); messages.push({role,text:value}); return article;
+      };
+      const setBusy=(value)=>{
+        busy=Boolean(value);
+        let stop=document.querySelector('[data-testid="stop-button"]');
+        if(busy&&!stop){ stop=document.createElement('button'); stop.type='button'; stop.dataset.testid='stop-button'; stop.setAttribute('aria-label','Остановить генерацию'); stop.textContent='■'; stop.addEventListener('click',()=>{stopClicks++;setBusy(false);}); form.append(stop); }
+        if(!busy&&stop)stop.remove();
+        sync();
+      };
+      composer.addEventListener('input',sync);
+      composer.addEventListener('keydown',event=>{
+        if(event.key==='Enter'&&!event.shiftKey){ event.preventDefault(); if(!button.disabled)form.requestSubmit(button); }
+      });
+      form.addEventListener('submit',event=>{
+        event.preventDefault(); if(button.disabled||!text())return;
+        add('user',text()); composer.replaceChildren(); sync(); setBusy(true);
+        responseTimer=setTimeout(()=>{ add('assistant','Спасибо за тёплую обратную связь! Продолжим.'); setBusy(false); },350);
+      });
+      window.fixture={
+        get messages(){return messages.map(item=>({...item}));},
+        get busy(){return busy;},
+        get draft(){return text();},
+        get stopClicks(){return stopClicks;},
+        setQueue(value){queueEnabled=Boolean(value);sync();},
+        setBusy,
+        setDraft(value){const p=document.createElement('p');p.textContent=value;composer.replaceChildren(p);composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));sync();},
+        setDisabled(value){forcedDisabled=Boolean(value);sync();},
+        setComposerVisible(value){form.style.display=value?'':'none';},
+        navigate(path='/c/fixture-next'){clearTimeout(responseTimer);history.pushState({},'',path);messages.length=0;conversation.querySelectorAll('[data-message-id^="fixture-"]').forEach(item=>item.remove());composer.replaceChildren();setBusy(false);window.dispatchEvent(new PopStateEvent('popstate'));},
+        clear(){messages.length=0;conversation.querySelectorAll('[data-message-id^="fixture-"]').forEach(item=>item.remove());composer.replaceChildren();setBusy(false);}
+      };
+    })();
+  </script>
+  <script src="/extension/content.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+#!/bin/zsh
+set -eu
+resources="$(cd -- "$(dirname -- "$0")/../Resources" && pwd)"
+lock="${TMPDIR:-/tmp}/goodgpt-${UID}.lock"
+if ! /bin/mkdir -- "$lock" 2>/dev/null; then
+  oldpid="$(/bin/cat "$lock/pid" 2>/dev/null || true)"
+  if [[ -z "$oldpid" ]]; then exit 0; fi
+  if [[ "$oldpid" == <-> ]] && /bin/kill -0 "$oldpid" 2>/dev/null; then
+    oldcommand="$(/bin/ps -p "$oldpid" -o args= 2>/dev/null || true)"
+    if [[ "$oldcommand" == *"/Resources/GoodGPT.js"* ]]; then exit 0; fi
+  fi
+  /bin/rm -f -- "$lock/pid"
+  /bin/rmdir -- "$lock" 2>/dev/null || exit 0
+  /bin/mkdir -- "$lock" 2>/dev/null || exit 0
+fi
+print -r -- "$$" > "$lock/pid"
+exec /usr/bin/osascript -l JavaScript "$resources/GoodGPT.js" "$resources"

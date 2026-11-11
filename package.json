@@ -1,0 +1,22 @@
+{
+  "name": "goodgpt",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Мешочек с угощениями и похвалой для Codex (ChatGPT) и Claude Code.",
+  "author": "Stepan Konovalov",
+  "license": "MIT",
+  "repository": {"type":"git","url":"https://github.com/Runeree/GoodGPT.git"},
+  "homepage": "https://github.com/Runeree/GoodGPT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check-syntax.mjs && node scripts/check-package.mjs",
+    "dev": "node tests/server.mjs",
+    "package": "npm run build && node scripts/check-package.mjs && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1",
+    "desktop:icons": "node desktop/scripts/icons.mjs",
+    "desktop:windows": "node desktop/scripts/icons.mjs && powershell -NoProfile -ExecutionPolicy Bypass -File desktop/windows/build.ps1",
+    "desktop:macos": "node desktop/scripts/package-macos.mjs",
+    "desktop:build": "npm run desktop:windows && npm run desktop:macos",
+    "desktop:check": "node desktop/scripts/check-package.mjs"
+  }
+}

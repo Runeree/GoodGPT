@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>GoodGPT</string>
+  <key>CFBundleDisplayName</key><string>GoodGPT</string>
+  <key>CFBundleIdentifier</key><string>app.goodgpt.desktop</string>
+  <key>CFBundleVersion</key><string>2</string>
+  <key>CFBundleShortVersionString</key><string>1.0.1</string>
+  <key>CFBundleExecutable</key><string>GoodGPT</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>GoodGPT.icns</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSSupportsAutomaticTermination</key><false/>
+  <key>NSAccessibilityUsageDescription</key><string>GoodGPT вставляет и отправляет вашу похвалу через обычное поле сообщения в активном Codex или Claude Code.</string>
+</dict></plist>

@@ -1,0 +1,14 @@
+node_modules/
+.playwright-cli/
+output/
+*.log
+extension/
+GoodGPT-*.zip
+dist/
+*.pem
+*.key
+*.pfx
+*.p12
+*.crx
+.env
+.env.*
