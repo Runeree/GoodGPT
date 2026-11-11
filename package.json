@@ -1,6 +1,6 @@
 {
   "name": "goodgpt",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "description": "Мешочек с угощениями и похвалой для Codex (ChatGPT) и Claude Code.",

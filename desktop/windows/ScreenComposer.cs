@@ -64,7 +64,13 @@ namespace GoodGPTDesktop
                         {
                             if (line.Words.Count == 0) continue;
                             double left = double.MaxValue, right = 0, upper = double.MaxValue, lower = 0;
-                            foreach (OcrWord word in line.Words) { var r = word.BoundingRect; left = Math.Min(left, r.X); upper = Math.Min(upper, r.Y); right = Math.Max(right, r.X + r.Width); lower = Math.Max(lower, r.Y + r.Height); }
+                            foreach (OcrWord word in line.Words)
+                            {
+                                var r = word.BoundingRect; left = Math.Min(left, r.X); upper = Math.Min(upper, r.Y); right = Math.Max(right, r.X + r.Width); lower = Math.Max(lower, r.Y + r.Height);
+                                // OCR may put the preview and its button on one line.
+                                // Keep the button's own word bounds for the actual click.
+                                if (IsSteer(word.Text)) result.Lines.Add(new Line { Text = word.Text, Bounds = new System.Windows.Rect(bounds.Left + r.X / scale, top + r.Y / scale, r.Width / scale, r.Height / scale) });
+                            }
                             result.Lines.Add(new Line { Text = line.Text, Bounds = new System.Windows.Rect(bounds.Left + left / scale, top + upper / scale, (right - left) / scale, (lower - upper) / scale) });
                         }
                     }

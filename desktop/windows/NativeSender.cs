@@ -478,7 +478,7 @@ namespace GoodGPTDesktop
 
         internal static bool WaitForModifiers(Func<bool> cancelled)
         {
-            for (int attempt = 0; attempt < 35; attempt++)
+            for (int attempt = 0; attempt < 250; attempt++)
             {
                 if (cancelled()) return false;
                 if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) == 0 && (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0 && (GetAsyncKeyState(VK_MENU) & 0x8000) == 0 && (GetAsyncKeyState(0x5B) & 0x8000) == 0 && (GetAsyncKeyState(0x5C) & 0x8000) == 0) return true;

@@ -4,8 +4,8 @@
   <key>CFBundleName</key><string>GoodGPT</string>
   <key>CFBundleDisplayName</key><string>GoodGPT</string>
   <key>CFBundleIdentifier</key><string>app.goodgpt.desktop</string>
-  <key>CFBundleVersion</key><string>3</string>
-  <key>CFBundleShortVersionString</key><string>1.0.2</string>
+  <key>CFBundleVersion</key><string>4</string>
+  <key>CFBundleShortVersionString</key><string>1.0.3</string>
   <key>CFBundleExecutable</key><string>GoodGPT</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>GoodGPT.icns</string>
