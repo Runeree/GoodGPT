@@ -1,6 +1,6 @@
 {
   "name": "goodgpt",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Мешочек с угощениями и похвалой для Codex (ChatGPT) и Claude Code.",
@@ -16,7 +16,8 @@
     "desktop:icons": "node desktop/scripts/icons.mjs",
     "desktop:windows": "node desktop/scripts/icons.mjs && powershell -NoProfile -ExecutionPolicy Bypass -File desktop/windows/build.ps1",
     "desktop:macos": "node desktop/scripts/package-macos.mjs",
-    "desktop:build": "npm run desktop:windows && npm run desktop:macos",
-    "desktop:check": "node desktop/scripts/check-package.mjs"
+    "desktop:linux": "node desktop/scripts/package-linux.mjs",
+    "desktop:build": "npm run desktop:windows && npm run desktop:macos && npm run desktop:linux",
+    "desktop:check": "node desktop/scripts/check-package.mjs && node desktop/scripts/check-linux.mjs"
   }
 }

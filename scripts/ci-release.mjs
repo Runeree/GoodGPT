@@ -24,7 +24,7 @@ async function api(path,{method='GET',body,binary=false,allow404=false}={}) {
   return response.status===204?null:response.json();
 }
 
-const names=['GoodGPT-Windows.exe','GoodGPT-macOS.zip','GoodGPT-Chrome.zip','GoodGPT-All.zip','SHA256SUMS.txt'];
+const names=['GoodGPT-Windows.exe','GoodGPT-macOS.zip','GoodGPT-Linux.deb','GoodGPT-Chrome.zip','GoodGPT-All.zip','SHA256SUMS.txt'];
 const assets=[];
 for(const name of names) {
   const data=await readFile(new URL('../dist/'+name,import.meta.url));

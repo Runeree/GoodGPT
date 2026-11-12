@@ -15,6 +15,8 @@ $bundleFiles = @(
     @{ Source = 'desktop/windows/README.md'; Target = 'Windows/README.md' },
     @{ Source = 'dist/GoodGPT-macOS.zip'; Target = 'macOS/GoodGPT-macOS.zip' },
     @{ Source = 'desktop/macos/README.md'; Target = 'macOS/README.md' },
+    @{ Source = 'dist/GoodGPT-Linux.deb'; Target = 'Linux/GoodGPT-Linux.deb' },
+    @{ Source = 'desktop/linux/README.md'; Target = 'Linux/README.md' },
     @{ Source = 'dist/GoodGPT-Chrome.zip'; Target = 'Chrome/GoodGPT-Chrome.zip' },
     @{ Source = 'INSTALL.txt'; Target = 'Chrome/INSTALL.txt' },
     @{ Source = 'README.md'; Target = 'README.md' },
@@ -38,6 +40,7 @@ try {
                 $readmeText = [regex]::Replace($readmeText, '<img[^>]*>\r?\n', '')
                 $readmeText = $readmeText.Replace('desktop/windows/README.md', 'Windows/README.md')
                 $readmeText = $readmeText.Replace('desktop/macos/README.md', 'macOS/README.md')
+                $readmeText = $readmeText.Replace('desktop/linux/README.md', 'Linux/README.md')
                 $readmeText = $readmeText.Replace('(LICENSE)', '(LICENSE.txt)')
                 $readmeText = $readmeText.Replace('(assets/README.md)', '(https://github.com/Runeree/GoodGPT/blob/main/assets/README.md)')
                 $readmeEntry = $zip.CreateEntry('README.md')
@@ -53,7 +56,7 @@ try {
     } finally { $zip.Dispose() }
 } finally { $stream.Dispose() }
 
-$assetNames = @('GoodGPT-Windows.exe', 'GoodGPT-macOS.zip', 'GoodGPT-Chrome.zip', 'GoodGPT-All.zip')
+$assetNames = @('GoodGPT-Windows.exe', 'GoodGPT-macOS.zip', 'GoodGPT-Linux.deb', 'GoodGPT-Chrome.zip', 'GoodGPT-All.zip')
 $checksumLines = foreach ($assetName in $assetNames) {
     $hash = Get-FileHash -LiteralPath (Join-Path $distPath $assetName) -Algorithm SHA256
     $hash.Hash.ToLowerInvariant() + '  ' + $assetName

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=GoodGPT
+Comment=Treats and praise for your AI chat
+Comment[ru]=Угощения и похвала для ИИ
+Exec=goodgpt
+Icon=goodgpt
+Terminal=false
+Categories=Utility;
+StartupNotify=false

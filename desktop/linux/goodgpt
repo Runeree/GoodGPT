@@ -1,0 +1,4 @@
+#!/bin/sh
+# GTK and Python are resolved by the Debian package manager.
+export NO_AT_BRIDGE=0
+exec /usr/bin/python3 /usr/share/goodgpt/goodgpt.py "$@"

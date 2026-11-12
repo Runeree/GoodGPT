@@ -117,12 +117,13 @@ if (mode==='upload') {
   const paths=[];
   async function walk(folder) {
     for (const item of await readdir(resolve(root,folder),{withFileTypes:true})) {
+      if(item.name==='__pycache__' || item.name.endsWith('.pyc')) continue;
       if (item.isSymbolicLink()) throw new Error('Symlinks are not included in a public upload.');
       const path=folder+'/'+item.name;
       if (item.isDirectory()) await walk(path); else paths.push(path);
     }
   }
-  for (const folder of ['assets','desktop','src','scripts','tests']) await walk(folder);
+  for (const folder of ['assets','desktop','src','scripts','tests','.github']) await walk(folder);
   paths.push('README.md','INSTALL.txt','LICENSE','package.json','.gitignore','.gitattributes','RELEASE.md');
   paths.sort();
   if (paths.some(path=>/(?:^|\/)(?:\.git|node_modules|dist|\.env)(?:\/|$)|\.(?:pem|key|pfx|p12|crx)$/i.test(path))) throw new Error('Unexpected private or generated file in publication list.');
@@ -142,14 +143,14 @@ if (mode==='upload') {
       if (existing.get(path)?.sha!==blobSha) {
         sha=(await api(`${repoPath}/git/blobs`,{method:'POST',body:{content:data.toString('base64'),encoding:'base64'}})).sha;
       }
-      entries.push({path,mode:path==='desktop/macos/GoodGPT'?'100755':'100644',type:'blob',sha});
+      entries.push({path,mode:['desktop/macos/GoodGPT','desktop/linux/goodgpt'].includes(path)?'100755':'100644',type:'blob',sha});
       complete++; if (complete%12===0 || complete===paths.length) console.log(`Prepared files: ${complete}/${paths.length}`);
     }
   }));
   entries.sort((a,b)=>a.path.localeCompare(b.path));
   const tree=await api(`${repoPath}/git/trees`,{method:'POST',body:{base_tree:oldCommit.tree.sha,tree:entries}});
   if (tree.sha===oldCommit.tree.sha) {console.log('Repository source already matches this workspace.');process.exit(0);}
-  const commit=await api(`${repoPath}/git/commits`,{method:'POST',body:{message:'Release GoodGPT for Windows, macOS and Chrome',tree:tree.sha,parents:[head.object.sha],author:{name:'Stepan Konovalov',email:'120125513+Runeree@users.noreply.github.com',date:new Date().toISOString()}}});
+  const commit=await api(`${repoPath}/git/commits`,{method:'POST',body:{message:'Add Linux Debian package and installation instructions',tree:tree.sha,parents:[head.object.sha],author:{name:'Stepan Konovalov',email:'120125513+Runeree@users.noreply.github.com',date:new Date().toISOString()}}});
   // force:false preserves any concurrent work in the public repository.
   await api(`${repoPath}/git/refs/heads/${branch}`,{method:'PATCH',body:{sha:commit.sha,force:false}});
   console.log(`Source published: ${commit.html_url}`);
@@ -170,10 +171,10 @@ if (mode==='release') {
       console.log(`Build has no allocated runner: ${run.id}. Publishing existing packages.`);
     }
   }
-  await api(repoPath,{method:'PATCH',body:{description:'GoodGPT: угощения и похвала для Codex (ChatGPT) и Claude Code. Windows, macOS и Chrome.'}});
+  await api(repoPath,{method:'PATCH',body:{description:'GoodGPT: угощения и похвала для Codex (ChatGPT) и Claude Code. Windows, macOS, Linux и Chrome.'}});
   let release=await api(`${repoPath}/releases/tags/${tag}`,{allow404:true});
   if (!release) release=await api(`${repoPath}/releases`,{method:'POST',body:{tag_name:tag,target_commitish:repo.default_branch,name:'GoodGPT '+version,body,draft:true,prerelease:false}});
-  const names=['GoodGPT-Windows.exe','GoodGPT-macOS.zip','GoodGPT-Chrome.zip','GoodGPT-All.zip','SHA256SUMS.txt'];
+  const names=['GoodGPT-Windows.exe','GoodGPT-macOS.zip','GoodGPT-Linux.deb','GoodGPT-Chrome.zip','GoodGPT-All.zip','SHA256SUMS.txt'];
   async function uploadAsset(assetName) {
     const data=await readFile(resolve(root,'dist',assetName));
     const digest='sha256:'+createHash('sha256').update(data).digest('hex');

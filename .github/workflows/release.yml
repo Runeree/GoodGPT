@@ -1,6 +1,12 @@
 name: Build and publish GoodGPT
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/linux/**'
+      - 'desktop/scripts/*linux*.mjs'
+      - '.github/workflows/release.yml'
   create:
   workflow_dispatch:
 
@@ -8,11 +14,34 @@ permissions:
   contents: write
 
 concurrency:
-  group: goodgpt-release
+  group: goodgpt-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  linux-check:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release/'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Build and install Debian package
+        run: |
+          npm run desktop:linux
+          node desktop/scripts/check-linux.mjs
+          sudo apt-get update
+          sudo apt-get install -y ./dist/GoodGPT-Linux.deb xvfb xcompmgr openbox dbus-x11 desktop-file-utils
+          dpkg-deb --info dist/GoodGPT-Linux.deb
+          desktop-file-validate desktop/linux/goodgpt.desktop
+      - name: Check input guards and transparent overlay
+        run: |
+          python3 -m py_compile desktop/linux/bridge.py desktop/linux/goodgpt.py
+          python3 -B -m unittest discover -s desktop/linux -p 'test_*.py' -v
+          timeout 25s xvfb-run -a -s '-screen 0 1280x800x24 +extension RENDER' dbus-run-session -- sh -c 'openbox >/tmp/openbox.log 2>&1 & xcompmgr -a >/tmp/compositor.log 2>&1 & sleep 2; XDG_SESSION_TYPE=x11 goodgpt --smoke-test'
   release:
+    needs: linux-check
     if: github.event_name == 'workflow_dispatch' || (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release/'))
     runs-on: windows-2025
     timeout-minutes: 15
